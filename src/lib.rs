@@ -1,14 +1,13 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+mod file;
+mod merkle;
+
+type Data = [u8; 1024];
+type Proof = Vec<Hash>;
+
+#[derive(Clone)]
+pub struct Chunk {
+    pub data: Data,
+    pub leaf_idx: usize,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub struct Hash(String);
