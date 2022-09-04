@@ -10,4 +10,5 @@ pub struct Chunk {
     pub leaf_idx: usize,
 }
 
-pub struct Hash(String);
+#[derive(Clone, Debug)]
+pub struct Hash([u8; 32]);
