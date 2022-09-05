@@ -1,22 +1,22 @@
 use crate::{
-    merkle::{FileTree, MerkleTree},
-    Chunk, Proof,
+    merkle::{ChunkMerkleTree, MerkleTree},
+    Chunk,
 };
 
 struct File {
     chunks: Vec<Chunk>,
-    tree: FileTree,
+    tree: ChunkMerkleTree,
 }
 
 impl File {
     pub fn new(data: &[u8]) -> Self {
         let chunks = Self::get_chunks(data);
-        let tree = FileTree::new(&chunks);
+        let tree = ChunkMerkleTree::new(&chunks);
 
         Self { chunks, tree }
     }
 
-    pub fn get_chunk(&self, idx: usize) -> Result<(Chunk, Proof), String> {
+    pub fn get_chunk(&self, idx: usize) -> Result<(Chunk, Vec<crate::Hash>), String> {
         let chunk = self.chunks.get(idx).cloned().ok_or("invalid idx")?;
         let proof = self.tree.get_proof_hashes(chunk.leaf_idx)?;
 

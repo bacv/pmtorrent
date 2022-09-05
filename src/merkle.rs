@@ -1,30 +1,72 @@
-use crate::{Chunk, Hash, Proof};
+use crate::{Chunk, Hash};
 
-pub trait MerkleTree<D> {
-    fn get_proof_hashes(&self, idx: usize) -> Result<Proof, String>;
-    fn get_sibling(&self, idx: usize) -> Result<(Hash, usize), String>;
-    fn get_parent(&self, idx: usize) -> Result<(Hash, usize), String>;
-    fn verify(&self, leaf: &D, hashes: Vec<Hash>) -> Result<(), String>;
+pub trait Hasher {
+    type Hash;
+
+    fn digest(&self, data: &[u8]) -> Self::Hash;
 }
 
-pub struct FileTree {
-    leaves: usize,
-    height: usize,
-    tree: Vec<Hash>,
+pub trait AsBytes {
+    fn as_bytes(&self) -> &[u8];
 }
 
-impl FileTree {
-    pub fn new(chunks: &[Chunk]) -> Self {
+pub trait MerkleTree<D, H>
+where
+    D: AsBytes,
+    H: Hasher,
+    H::Hash: AsBytes + Clone,
+{
+    fn get_tree(&self) -> &[H::Hash];
+
+    fn build_first_level(hasher: &H, leaves: &[D]) -> Vec<H::Hash> {
+        leaves
+            .iter()
+            .map(|l| hasher.digest(l.as_bytes()))
+            .collect::<Vec<H::Hash>>()
+    }
+
+    fn build_inner_level(hasher: &H, previous_level: &[H::Hash]) -> Vec<H::Hash> {
+        previous_level
+            .chunks(2)
+            .map(|c| {
+                let l = &c[0];
+                let r = &c[1];
+                hasher.digest(&[l.as_bytes(), r.as_bytes()].concat())
+            })
+            .collect::<Vec<H::Hash>>()
+    }
+
+    fn verify(&self, leaf: &D, hashes: Vec<H::Hash>) -> Result<(), String> {
+        //
         todo!()
     }
-}
 
-impl MerkleTree<Chunk> for FileTree {
-    fn get_proof_hashes(&self, idx: usize) -> Result<Proof, String> {
-        let mut hashes = Proof::default();
+    fn build_tree(hasher: &H, leaves: &[D]) -> Vec<H::Hash> {
+        let mut tree: Vec<H::Hash> = vec![];
+
+        let first_level = Self::build_first_level(hasher, leaves);
+        let mut current_level = first_level;
+
+        // Every level will have two times less nodes than the previous level.
+        while current_level.len() > 2 {
+            let level = Self::build_inner_level(hasher, &current_level);
+            tree.append(&mut current_level);
+            current_level = level;
+        }
+
+        // Append the root hash which was skiped by the while loop.
+        tree.append(&mut current_level);
+
+        tree
+    }
+
+    fn get_proof_hashes(&self, idx: usize) -> Result<Vec<H::Hash>, String> {
+        let height = self.get_height();
+
+        let mut hashes = Vec::default();
         let mut idx = idx;
 
-        for _ in 0..self.height {
+        for _ in 0..height {
             let (s_hash, s_idx) = self.get_sibling(idx)?;
             let (_, p_idx) = self.get_parent(s_idx)?;
 
@@ -35,10 +77,10 @@ impl MerkleTree<Chunk> for FileTree {
         Ok(hashes)
     }
 
-    fn get_sibling(&self, idx: usize) -> Result<(Hash, usize), String> {
+    fn get_sibling(&self, idx: usize) -> Result<(H::Hash, usize), String> {
         let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
         let hash = self
-            .tree
+            .get_tree()
             .get(sibling_idx)
             .ok_or_else(|| "invalid index".to_string())?
             .clone();
@@ -46,12 +88,12 @@ impl MerkleTree<Chunk> for FileTree {
         Ok((hash, sibling_idx))
     }
 
-    fn get_parent(&self, idx: usize) -> Result<(Hash, usize), String> {
-        let node_count = self.tree.len();
+    fn get_parent(&self, idx: usize) -> Result<(H::Hash, usize), String> {
+        let tree = self.get_tree();
+        let node_count = tree.len();
         let parent_idx = node_count - (node_count - idx - 1 + idx % 2) / 2;
 
-        let hash = self
-            .tree
+        let hash = tree
             .get(parent_idx)
             .ok_or_else(|| "invalid index".to_string())?
             .clone();
@@ -59,8 +101,44 @@ impl MerkleTree<Chunk> for FileTree {
         Ok((hash, parent_idx))
     }
 
-    fn verify(&self, leaf: &Chunk, hashes: Vec<Hash>) -> Result<(), String> {
+    fn get_height(&self) -> usize {
+        let leaves = self.get_leaf_count();
+        let height = (leaves as f32).log2() + 1.;
+        height as usize
+    }
+
+    fn get_leaf_count(&self) -> usize {
+        let node_count = self.get_tree().len();
+        (node_count + 1) / 2
+    }
+}
+
+pub struct Sha256Hasher;
+
+impl Hasher for Sha256Hasher {
+    type Hash = Hash;
+
+    fn digest(&self, data: &[u8]) -> Hash {
         todo!()
+    }
+}
+
+pub struct ChunkMerkleTree {
+    tree: Vec<Hash>,
+}
+
+impl ChunkMerkleTree {
+    pub fn new(chunks: &[Chunk]) -> Self {
+        let hasher = Sha256Hasher {};
+        let tree = Self::build_tree(&hasher, chunks);
+
+        Self { tree }
+    }
+}
+
+impl MerkleTree<Chunk, Sha256Hasher> for ChunkMerkleTree {
+    fn get_tree(&self) -> &[Hash] {
+        &self.tree
     }
 }
 
@@ -75,11 +153,7 @@ mod tests {
             tree.push(Hash([i; 32]));
         }
 
-        let file_tree = FileTree {
-            leaves: 0,
-            height: 0,
-            tree,
-        };
+        let file_tree = ChunkMerkleTree { tree };
 
         for i in 0..file_tree.tree.len() - 1 {
             let s = file_tree.get_sibling(i).unwrap();
