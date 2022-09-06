@@ -17,7 +17,7 @@ impl AsBytes for Chunk {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Hash([u8; 32]);
 
 impl AsBytes for Hash {

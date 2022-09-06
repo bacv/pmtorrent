@@ -1,5 +1,3 @@
-use crate::{Chunk, Hash};
-
 pub trait Hasher {
     type Hash;
 
@@ -14,7 +12,7 @@ pub trait MerkleTree<D, H>
 where
     D: AsBytes,
     H: Hasher,
-    H::Hash: AsBytes + Clone,
+    H::Hash: AsBytes + Default + Clone,
 {
     fn get_tree(&self) -> &[H::Hash];
 
@@ -36,9 +34,15 @@ where
             .collect::<Vec<H::Hash>>()
     }
 
-    fn verify(&self, leaf: &D, hashes: Vec<H::Hash>) -> Result<(), String> {
-        //
-        todo!()
+    fn root_from_partial(hasher: &H, leaf: &D, hashes: Vec<H::Hash>) -> Result<H::Hash, String> {
+        let leaf_hash = hasher.digest(leaf.as_bytes());
+        let mut root_hash = hasher.digest(&[leaf_hash.as_bytes(), hashes[0].as_bytes()].concat());
+
+        for h in hashes[1..].iter() {
+            root_hash = hasher.digest(&[root_hash.as_bytes(), h.as_bytes()].concat());
+        }
+
+        Ok(root_hash)
     }
 
     fn build_tree(hasher: &H, leaves: &[D]) -> Vec<H::Hash> {
@@ -113,51 +117,74 @@ where
     }
 }
 
-pub struct Sha256Hasher;
+#[derive(Clone, Default, Debug)]
+struct EmojiHash {
+    hash: [u8; 4],
+}
 
-impl Hasher for Sha256Hasher {
-    type Hash = Hash;
+impl EmojiHash {
+    pub unsafe fn emoji(&self) -> char {
+        let u_32 = u32::from_be_bytes(self.hash);
 
-    fn digest(&self, data: &[u8]) -> Hash {
-        todo!()
+        char::from_u32_unchecked(u_32)
     }
 }
 
-pub struct ChunkMerkleTree {
-    tree: Vec<Hash>,
-}
-
-impl ChunkMerkleTree {
-    pub fn new(chunks: &[Chunk]) -> Self {
-        let hasher = Sha256Hasher {};
-        let tree = Self::build_tree(&hasher, chunks);
-
-        Self { tree }
+impl AsBytes for EmojiHash {
+    fn as_bytes(&self) -> &[u8] {
+        &self.hash
     }
 }
 
-impl MerkleTree<Chunk, Sha256Hasher> for ChunkMerkleTree {
-    fn get_tree(&self) -> &[Hash] {
+struct EmojiHasher;
+impl Hasher for EmojiHasher {
+    type Hash = EmojiHash;
+
+    fn digest(&self, data: &[u8]) -> Self::Hash {
+        let mut hash = data[0];
+        let prime = 101;
+        for v in data[1..].iter() {
+            hash = hash % prime + v;
+        }
+
+        hash %= prime;
+        // using 👂 as base because it has 182 sequential emojis.
+        let emoji = '\u{1F442}' as u32 + hash as u32;
+
+        EmojiHash {
+            hash: emoji.to_be_bytes(),
+        }
+    }
+}
+
+impl AsBytes for Vec<u8> {
+    fn as_bytes(&self) -> &[u8] {
+        self
+    }
+}
+
+struct DummyMerkleTree {
+    tree: Vec<EmojiHash>,
+}
+
+impl MerkleTree<Vec<u8>, EmojiHasher> for DummyMerkleTree {
+    fn get_tree(&self) -> &[EmojiHash] {
         &self.tree
     }
 }
 
 mod tests {
+    use super::*;
+
     #[test]
-    #[ignore]
-    fn get_correct_sibling() {
-        use super::*;
-
-        let mut tree = Vec::new();
-        for i in 0..7 {
-            tree.push(Hash([i; 32]));
-        }
-
-        let file_tree = ChunkMerkleTree { tree };
-
-        for i in 0..file_tree.tree.len() - 1 {
-            let s = file_tree.get_sibling(i).unwrap();
-            println!("i: {:?}; s: {:?}", i, s);
+    fn emoji_sanity_test() {
+        let hasher = EmojiHasher;
+        for i in 0..100 {
+            let emoji = hasher.digest(format!("{}{}{}{}{}", i, i, i, i, i).as_bytes());
+            unsafe {
+                println!("{:?}", emoji);
+                println!("{}", emoji.emoji());
+            }
         }
     }
 

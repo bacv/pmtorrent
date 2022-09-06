@@ -1,6 +1,6 @@
 use crate::{
-    merkle::{ChunkMerkleTree, MerkleTree},
-    Chunk,
+    merkle::{Hasher, MerkleTree},
+    Chunk, Hash,
 };
 
 struct File {
@@ -25,5 +25,34 @@ impl File {
 
     fn get_chunks(data: &[u8]) -> Vec<Chunk> {
         todo!()
+    }
+}
+
+pub struct Sha256Hasher;
+
+impl Hasher for Sha256Hasher {
+    type Hash = Hash;
+
+    fn digest(&self, data: &[u8]) -> Hash {
+        todo!()
+    }
+}
+
+pub struct ChunkMerkleTree {
+    tree: Vec<Hash>,
+}
+
+impl ChunkMerkleTree {
+    pub fn new(chunks: &[Chunk]) -> Self {
+        let hasher = Sha256Hasher {};
+        let tree = Self::build_tree(&hasher, chunks);
+
+        Self { tree }
+    }
+}
+
+impl MerkleTree<Chunk, Sha256Hasher> for ChunkMerkleTree {
+    fn get_tree(&self) -> &[Hash] {
+        &self.tree
     }
 }
