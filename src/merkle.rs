@@ -1,7 +1,7 @@
 use std::fmt::{self, Debug};
 
 pub trait Hasher {
-    type Hash: Debug;
+    type Hash;
 
     fn digest(&self, data: &[u8]) -> Self::Hash;
 }
@@ -25,7 +25,7 @@ where
         let mut current_level = first_level;
 
         // Every level will have two times less nodes than the previous level.
-        while current_level.len() > 2 {
+        while current_level.len() > 1 {
             let level = Self::build_inner_level(hasher, &current_level);
             tree.append(&mut current_level);
             current_level = level;
@@ -55,12 +55,36 @@ where
             .collect::<Vec<H::Hash>>()
     }
 
-    fn root_from_partial(hasher: &H, leaf: &D, hashes: Vec<H::Hash>) -> Result<H::Hash, String> {
-        let leaf_hash = hasher.digest(leaf.as_bytes());
-        let mut root_hash = hasher.digest(&[leaf_hash.as_bytes(), hashes[0].as_bytes()].concat());
+    fn root_from_partial(
+        hasher: &H,
+        leaf: &D,
+        leaf_idx: usize,
+        leaf_count: usize,
+        hashes: Vec<H::Hash>,
+    ) -> Result<H::Hash, String> {
+        let node_count = leaf_count * 2 - 1;
+
+        let mut l = &hasher.digest(leaf.as_bytes());
+        let mut r = &hashes[0];
+
+        if leaf_idx % 2 != 0 {
+            std::mem::swap(&mut l, &mut r)
+        }
+
+        let mut root_hash = hasher.digest(&[l.as_bytes(), r.as_bytes()].concat());
+        let mut parent_idx = node_count - (node_count - leaf_idx - 1 + leaf_idx % 2) / 2;
 
         for h in hashes[1..].iter() {
-            root_hash = hasher.digest(&[root_hash.as_bytes(), h.as_bytes()].concat());
+            let mut l = &root_hash;
+            let mut r = h;
+            if parent_idx % 2 != 0 {
+                std::mem::swap(&mut l, &mut r);
+            }
+
+            root_hash = hasher.digest(&[l.as_bytes(), r.as_bytes()].concat());
+            if parent_idx + 2 >= node_count {
+                parent_idx = node_count - (node_count - parent_idx - 1 + parent_idx % 2) / 2;
+            }
         }
 
         Ok(root_hash)
@@ -72,7 +96,7 @@ where
         let mut hashes = Vec::default();
         let mut idx = idx;
 
-        for _ in 0..height {
+        for _ in 0..height - 1 {
             let (s_hash, s_idx) = self.get_sibling(idx)?;
             let (_, p_idx) = self.get_parent(s_idx)?;
 
@@ -84,6 +108,10 @@ where
     }
 
     fn get_sibling(&self, idx: usize) -> Result<(H::Hash, usize), String> {
+        if idx >= self.get_tree().len() {
+            return Err("invalid index".into());
+        }
+
         let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
         let hash = self
             .get_tree()
@@ -95,6 +123,10 @@ where
     }
 
     fn get_parent(&self, idx: usize) -> Result<(H::Hash, usize), String> {
+        if idx >= self.get_tree().len() {
+            return Err("invalid index".into());
+        }
+
         let tree = self.get_tree();
         let node_count = tree.len();
         let parent_idx = node_count - (node_count - idx - 1 + idx % 2) / 2;
@@ -119,7 +151,7 @@ where
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 struct EmojiHash {
     hash: [u8; 4],
 }
@@ -132,7 +164,7 @@ impl EmojiHash {
     }
 }
 
-impl fmt::Debug for EmojiHash {
+impl Debug for EmojiHash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let emoji = unsafe { self.emoji() };
         write!(f, "{}", emoji)
@@ -158,7 +190,7 @@ impl Hasher for EmojiHasher {
         }
 
         hash %= prime;
-        // using 👂 as base because it has 182 sequential emojis.
+        // using 👂 as a base because it has 182 sequential emojis.
         let emoji = '\u{1F442}' as u32 + hash as u32;
 
         EmojiHash {
@@ -198,44 +230,94 @@ mod tests {
 
     #[test]
     fn test_build_tree() {
-        let leaves = &["hi", "this", "is", "a"];
-        let dummy = DummyMerkleTree::new(leaves);
-        println!("{:?}", dummy)
+        let leaves = &["this", "is", "sparta", "!"];
+        let expected_leaves_emojis = ['👅', '👩', '👣', '👣'];
+        let expected_root_emoji = '👯';
+
+        let dummy_tree = DummyMerkleTree::new(leaves);
+        let dummy_tree = dummy_tree.get_tree();
+
+        let expected_len = leaves.len() * 2 - 1;
+        assert_eq!(dummy_tree.len(), expected_len);
+
+        for (i, _) in leaves.iter().enumerate() {
+            let emoji = unsafe { dummy_tree[i].emoji() };
+            assert_eq!(emoji, expected_leaves_emojis[i]);
+        }
+
+        let root = unsafe { dummy_tree[expected_len - 1].emoji() };
+        assert_eq!(root, expected_root_emoji);
     }
 
     #[test]
-    fn test_get_sibling() {}
+    fn test_get_sibling() {
+        let expected_tree = [
+            '📉', '📨', '👡', '👢', '💣', '👋', '📰', '📱', '👳', '💅', '💰', '👘', '👯', '📊',
+            '💰',
+        ];
+
+        let leaves: Vec<&str> = "another valid number of a first level nodes"
+            .split(' ')
+            .collect();
+
+        let dummy_tree = DummyMerkleTree::new(&leaves);
+
+        let (hash, idx) = dummy_tree.get_sibling(0).unwrap(); // 📉
+        assert_eq!(unsafe { hash.emoji() }, expected_tree[1]); // 📨
+        assert_eq!(idx, 1);
+
+        let (hash, idx) = dummy_tree.get_sibling(9).unwrap(); // 💅
+        assert_eq!(unsafe { hash.emoji() }, expected_tree[8]); // 👳
+        assert_eq!(idx, 8);
+
+        let res = dummy_tree.get_sibling(14); // root has no siblings 🥺.
+        assert!(res.is_err());
+
+        let res = dummy_tree.get_sibling(15); // non existent node.
+        assert!(res.is_err());
+    }
 
     #[test]
-    fn test_get_parent() {}
+    fn test_get_parent() {
+        let expected_tree = [
+            '👂', '💛', '💍', '💎', '💅', '💛', '💜', '👅', '📩', '💛', '💅', '💑', '💁', '👢',
+            '👹', '👂', '👔', '📝', '📢', '💣', '👆', '📘', '💥', '📈', '💨', '👇', '💕', '👺',
+            '💱', '📑', '👄',
+        ];
+
+        // A dark twist to the emoji merkle tree.
+        let leaves: Vec<&str> = "なぜそんなに真剣なんだ? 🃏".split("").into_iter().collect();
+
+        let dummy_tree = DummyMerkleTree::new(&leaves);
+
+        let (hash, idx) = dummy_tree.get_parent(0).unwrap(); // 👂
+        assert_eq!(unsafe { hash.emoji() }, expected_tree[16]); // 👔
+        assert_eq!(idx, 16);
+
+        let (hash, idx) = dummy_tree.get_parent(16).unwrap(); // 👔
+        assert_eq!(unsafe { hash.emoji() }, expected_tree[24]); // 💨
+        assert_eq!(idx, 24);
+
+        let res = dummy_tree.get_parent(31); // root has no parents 🥺.
+        assert!(res.is_err());
+
+        let res = dummy_tree.get_parent(32); // non existent node.
+        assert!(res.is_err());
+    }
 
     #[test]
-    fn test_root_from_partial() {}
-
-    #[test]
-    #[ignore]
-    fn emoji_sanity_test() {
+    fn test_root_from_partial() {
+        let leaves: Vec<&str> = "💁 💂 💃 💄 💅 💆 👏 📮".split(' ').into_iter().collect();
         let hasher = EmojiHasher;
-        for i in 0..100 {
-            let hash = hasher.digest(format!("{}{}{}{}{}", i, i, i, i, i).as_bytes());
-            unsafe {
-                println!("{:?}", hash);
-                println!("{}", hash.emoji());
-            }
-        }
-    }
 
-    #[test]
-    #[ignore]
-    fn node_parents() {
-        let l = 8;
-        // node count.
-        let n = 2 * l - 1;
+        let dummy_tree = DummyMerkleTree::new(&leaves);
+        let trusted_root = dummy_tree.get_tree().last().unwrap();
 
-        // ignore the root, we know it's possition
-        for i in 0..n - 1 {
-            let p = n - (n - i - 1 + i % 2) / 2;
-            println!("i: {:?}; p: {:?}", i, p);
-        }
+        let proof_parts = dummy_tree.get_proof_hashes(6).unwrap();
+        let untrusted_root =
+            DummyMerkleTree::root_from_partial(&hasher, &leaves[6], 6, leaves.len(), proof_parts)
+                .unwrap();
+
+        assert_eq!(*trusted_root, untrusted_root);
     }
 }
