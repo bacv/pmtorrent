@@ -1,5 +1,7 @@
+use std::fmt::{self, Debug};
+
 pub trait Hasher {
-    type Hash;
+    type Hash: Debug;
 
     fn digest(&self, data: &[u8]) -> Self::Hash;
 }
@@ -15,6 +17,25 @@ where
     H::Hash: AsBytes + Default + Clone,
 {
     fn get_tree(&self) -> &[H::Hash];
+
+    fn build_tree(hasher: &H, leaves: &[D]) -> Vec<H::Hash> {
+        let mut tree: Vec<H::Hash> = vec![];
+
+        let first_level = Self::build_first_level(hasher, leaves);
+        let mut current_level = first_level;
+
+        // Every level will have two times less nodes than the previous level.
+        while current_level.len() > 2 {
+            let level = Self::build_inner_level(hasher, &current_level);
+            tree.append(&mut current_level);
+            current_level = level;
+        }
+
+        // Append the root hash which was skiped by the while loop.
+        tree.append(&mut current_level);
+
+        tree
+    }
 
     fn build_first_level(hasher: &H, leaves: &[D]) -> Vec<H::Hash> {
         leaves
@@ -43,25 +64,6 @@ where
         }
 
         Ok(root_hash)
-    }
-
-    fn build_tree(hasher: &H, leaves: &[D]) -> Vec<H::Hash> {
-        let mut tree: Vec<H::Hash> = vec![];
-
-        let first_level = Self::build_first_level(hasher, leaves);
-        let mut current_level = first_level;
-
-        // Every level will have two times less nodes than the previous level.
-        while current_level.len() > 2 {
-            let level = Self::build_inner_level(hasher, &current_level);
-            tree.append(&mut current_level);
-            current_level = level;
-        }
-
-        // Append the root hash which was skiped by the while loop.
-        tree.append(&mut current_level);
-
-        tree
     }
 
     fn get_proof_hashes(&self, idx: usize) -> Result<Vec<H::Hash>, String> {
@@ -117,7 +119,7 @@ where
     }
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default)]
 struct EmojiHash {
     hash: [u8; 4],
 }
@@ -127,6 +129,13 @@ impl EmojiHash {
         let u_32 = u32::from_be_bytes(self.hash);
 
         char::from_u32_unchecked(u_32)
+    }
+}
+
+impl fmt::Debug for EmojiHash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let emoji = unsafe { self.emoji() };
+        write!(f, "{}", emoji)
     }
 }
 
@@ -141,10 +150,11 @@ impl Hasher for EmojiHasher {
     type Hash = EmojiHash;
 
     fn digest(&self, data: &[u8]) -> Self::Hash {
-        let mut hash = data[0];
-        let prime = 101;
-        for v in data[1..].iter() {
-            hash = hash % prime + v;
+        let mut hash = 0u8;
+        let prime = 181;
+        for v in data.iter() {
+            let (res, _) = (hash % prime).overflowing_add(*v);
+            hash = res;
         }
 
         hash %= prime;
@@ -157,17 +167,27 @@ impl Hasher for EmojiHasher {
     }
 }
 
-impl AsBytes for Vec<u8> {
+impl AsBytes for &'static str {
     fn as_bytes(&self) -> &[u8] {
-        self
+        str::as_bytes(self)
     }
 }
 
+#[derive(Debug)]
 struct DummyMerkleTree {
     tree: Vec<EmojiHash>,
 }
 
-impl MerkleTree<Vec<u8>, EmojiHasher> for DummyMerkleTree {
+impl DummyMerkleTree {
+    pub fn new(leaves: &[&'static str]) -> Self {
+        let hasher = EmojiHasher;
+        DummyMerkleTree {
+            tree: Self::build_tree(&hasher, leaves),
+        }
+    }
+}
+
+impl MerkleTree<&'static str, EmojiHasher> for DummyMerkleTree {
     fn get_tree(&self) -> &[EmojiHash] {
         &self.tree
     }
@@ -177,13 +197,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_build_tree() {
+        let leaves = &["hi", "this", "is", "a"];
+        let dummy = DummyMerkleTree::new(leaves);
+        println!("{:?}", dummy)
+    }
+
+    #[test]
+    fn test_get_sibling() {}
+
+    #[test]
+    fn test_get_parent() {}
+
+    #[test]
+    fn test_root_from_partial() {}
+
+    #[test]
+    #[ignore]
     fn emoji_sanity_test() {
         let hasher = EmojiHasher;
         for i in 0..100 {
-            let emoji = hasher.digest(format!("{}{}{}{}{}", i, i, i, i, i).as_bytes());
+            let hash = hasher.digest(format!("{}{}{}{}{}", i, i, i, i, i).as_bytes());
             unsafe {
-                println!("{:?}", emoji);
-                println!("{}", emoji.emoji());
+                println!("{:?}", hash);
+                println!("{}", hash.emoji());
             }
         }
     }
