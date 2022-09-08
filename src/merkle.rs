@@ -1,5 +1,11 @@
 use std::fmt::{self, Debug};
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum MerkleError {
+    LeafCount,
+    InvalidIdx,
+}
+
 pub trait Hasher {
     type Hash;
 
@@ -10,6 +16,10 @@ pub trait AsBytes {
     fn as_bytes(&self) -> &[u8];
 }
 
+pub fn is_pow_of_two(l: usize) -> bool {
+    (l & (l - 1)) == 0
+}
+
 pub trait MerkleTree<D, H>
 where
     D: AsBytes,
@@ -18,15 +28,19 @@ where
 {
     fn get_tree(&self) -> &[H::Hash];
 
-    fn build_tree(hasher: &H, leaves: &[D]) -> Vec<H::Hash> {
+    fn build_tree(hasher: &H, leaves: &[D]) -> Result<Vec<H::Hash>, MerkleError> {
+        if !is_pow_of_two(leaves.len()) {
+            return Err(MerkleError::LeafCount);
+        }
+
         let mut tree: Vec<H::Hash> = vec![];
 
-        let first_level = Self::build_first_level(hasher, leaves);
+        let first_level = Self::build_first_level(hasher, leaves)?;
         let mut current_level = first_level;
 
         // Every level will have two times less nodes than the previous level.
         while current_level.len() > 1 {
-            let level = Self::build_inner_level(hasher, &current_level);
+            let level = Self::build_inner_level(hasher, &current_level)?;
             tree.append(&mut current_level);
             current_level = level;
         }
@@ -34,25 +48,36 @@ where
         // Append the root hash which was skiped by the while loop.
         tree.append(&mut current_level);
 
-        tree
+        Ok(tree)
     }
 
-    fn build_first_level(hasher: &H, leaves: &[D]) -> Vec<H::Hash> {
-        leaves
+    fn build_first_level(hasher: &H, leaves: &[D]) -> Result<Vec<H::Hash>, MerkleError> {
+        if !is_pow_of_two(leaves.len()) {
+            return Err(MerkleError::LeafCount);
+        }
+
+        Ok(leaves
             .iter()
             .map(|l| hasher.digest(l.as_bytes()))
-            .collect::<Vec<H::Hash>>()
+            .collect::<Vec<H::Hash>>())
     }
 
-    fn build_inner_level(hasher: &H, previous_level: &[H::Hash]) -> Vec<H::Hash> {
-        previous_level
+    fn build_inner_level(
+        hasher: &H,
+        previous_level: &[H::Hash],
+    ) -> Result<Vec<H::Hash>, MerkleError> {
+        if !is_pow_of_two(previous_level.len()) {
+            return Err(MerkleError::LeafCount);
+        }
+
+        Ok(previous_level
             .chunks(2)
             .map(|c| {
                 let l = &c[0];
                 let r = &c[1];
                 hasher.digest(&[l.as_bytes(), r.as_bytes()].concat())
             })
-            .collect::<Vec<H::Hash>>()
+            .collect::<Vec<H::Hash>>())
     }
 
     fn root_from_partial(
@@ -61,7 +86,7 @@ where
         leaf_idx: usize,
         leaf_count: usize,
         hashes: Vec<H::Hash>,
-    ) -> Result<H::Hash, String> {
+    ) -> Result<H::Hash, MerkleError> {
         let node_count = leaf_count * 2 - 1;
 
         let mut l = &hasher.digest(leaf.as_bytes());
@@ -90,7 +115,7 @@ where
         Ok(root_hash)
     }
 
-    fn get_proof_hashes(&self, idx: usize) -> Result<Vec<H::Hash>, String> {
+    fn get_proof_hashes(&self, idx: usize) -> Result<Vec<H::Hash>, MerkleError> {
         let height = self.get_height();
 
         let mut hashes = Vec::default();
@@ -107,34 +132,31 @@ where
         Ok(hashes)
     }
 
-    fn get_sibling(&self, idx: usize) -> Result<(H::Hash, usize), String> {
+    fn get_sibling(&self, idx: usize) -> Result<(H::Hash, usize), MerkleError> {
         if idx >= self.get_tree().len() {
-            return Err("invalid index".into());
+            return Err(MerkleError::InvalidIdx);
         }
 
         let sibling_idx = if idx % 2 == 0 { idx + 1 } else { idx - 1 };
         let hash = self
             .get_tree()
             .get(sibling_idx)
-            .ok_or_else(|| "invalid index".to_string())?
+            .ok_or(MerkleError::InvalidIdx)?
             .clone();
 
         Ok((hash, sibling_idx))
     }
 
-    fn get_parent(&self, idx: usize) -> Result<(H::Hash, usize), String> {
+    fn get_parent(&self, idx: usize) -> Result<(H::Hash, usize), MerkleError> {
         if idx >= self.get_tree().len() {
-            return Err("invalid index".into());
+            return Err(MerkleError::InvalidIdx);
         }
 
         let tree = self.get_tree();
         let node_count = tree.len();
         let parent_idx = node_count - (node_count - idx - 1 + idx % 2) / 2;
 
-        let hash = tree
-            .get(parent_idx)
-            .ok_or_else(|| "invalid index".to_string())?
-            .clone();
+        let hash = tree.get(parent_idx).ok_or(MerkleError::InvalidIdx)?.clone();
 
         Ok((hash, parent_idx))
     }
@@ -205,17 +227,17 @@ impl AsBytes for &'static str {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct DummyMerkleTree {
     tree: Vec<EmojiHash>,
 }
 
 impl DummyMerkleTree {
-    pub fn new(leaves: &[&'static str]) -> Self {
+    pub fn new(leaves: &[&'static str]) -> Result<Self, MerkleError> {
         let hasher = EmojiHasher;
-        DummyMerkleTree {
-            tree: Self::build_tree(&hasher, leaves),
-        }
+        Ok(DummyMerkleTree {
+            tree: Self::build_tree(&hasher, leaves)?,
+        })
     }
 }
 
@@ -234,7 +256,7 @@ mod tests {
         let expected_leaves_emojis = ['👅', '👩', '👣', '👣'];
         let expected_root_emoji = '👯';
 
-        let dummy_tree = DummyMerkleTree::new(leaves);
+        let dummy_tree = DummyMerkleTree::new(leaves).expect("valid count of nodes");
         let dummy_tree = dummy_tree.get_tree();
 
         let expected_len = leaves.len() * 2 - 1;
@@ -260,7 +282,7 @@ mod tests {
             .split(' ')
             .collect();
 
-        let dummy_tree = DummyMerkleTree::new(&leaves);
+        let dummy_tree = DummyMerkleTree::new(&leaves).expect("valid count of nodes");
 
         let (hash, idx) = dummy_tree.get_sibling(0).unwrap(); // 📉
         assert_eq!(unsafe { hash.emoji() }, expected_tree[1]); // 📨
@@ -288,7 +310,7 @@ mod tests {
         // A dark twist to the emoji merkle tree.
         let leaves: Vec<&str> = "なぜそんなに真剣なんだ? 🃏".split("").into_iter().collect();
 
-        let dummy_tree = DummyMerkleTree::new(&leaves);
+        let dummy_tree = DummyMerkleTree::new(&leaves).expect("valid count of nodes");
 
         let (hash, idx) = dummy_tree.get_parent(0).unwrap(); // 👂
         assert_eq!(unsafe { hash.emoji() }, expected_tree[16]); // 👔
@@ -310,7 +332,7 @@ mod tests {
         let leaves: Vec<&str> = "💁 💂 💃 💄 💅 💆 👏 📮".split(' ').into_iter().collect();
         let hasher = EmojiHasher;
 
-        let dummy_tree = DummyMerkleTree::new(&leaves);
+        let dummy_tree = DummyMerkleTree::new(&leaves).expect("valid count of nodes");
         let trusted_root = dummy_tree.get_tree().last().unwrap();
 
         let proof_parts = dummy_tree.get_proof_hashes(6).unwrap();
@@ -319,5 +341,12 @@ mod tests {
                 .unwrap();
 
         assert_eq!(*trusted_root, untrusted_root);
+    }
+
+    #[test]
+    fn test_leaf_count() {
+        let leaves: Vec<&str> = "💁 💂 💃 💄 💅 💆 👏".split(' ').into_iter().collect();
+        let dummy_tree = DummyMerkleTree::new(&leaves);
+        assert_eq!(dummy_tree, Err(MerkleError::LeafCount));
     }
 }
