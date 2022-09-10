@@ -20,6 +20,46 @@ pub fn is_pow_of_two(l: usize) -> bool {
     l > 0 && (l & (l - 1)) == 0
 }
 
+pub fn root_from_partial<D, H>(
+    hasher: &H,
+    leaf: &D,
+    leaf_idx: usize,
+    leaf_count: usize,
+    hashes: Vec<H::Hash>,
+) -> Result<H::Hash, MerkleError>
+where
+    D: AsBytes,
+    H: Hasher,
+    H::Hash: AsBytes,
+{
+    let node_count = leaf_count * 2 - 1;
+
+    let mut l = &hasher.digest(leaf.as_bytes());
+    let mut r = &hashes[0];
+
+    if leaf_idx % 2 != 0 {
+        std::mem::swap(&mut l, &mut r)
+    }
+
+    let mut root_hash = hasher.digest(&[l.as_bytes(), r.as_bytes()].concat());
+    let mut parent_idx = node_count - (node_count - leaf_idx - 1 + leaf_idx % 2) / 2;
+
+    for h in hashes[1..].iter() {
+        let mut l = &root_hash;
+        let mut r = h;
+        if parent_idx % 2 != 0 {
+            std::mem::swap(&mut l, &mut r);
+        }
+
+        root_hash = hasher.digest(&[l.as_bytes(), r.as_bytes()].concat());
+        if parent_idx + 2 >= node_count {
+            parent_idx = node_count - (node_count - parent_idx - 1 + parent_idx % 2) / 2;
+        }
+    }
+
+    Ok(root_hash)
+}
+
 pub trait MerkleTree<D, H>
 where
     D: AsBytes,
@@ -333,8 +373,7 @@ mod tests {
 
         let proof_parts = dummy_tree.get_proof_hashes(6).unwrap();
         let untrusted_root =
-            DummyMerkleTree::root_from_partial(&hasher, &leaves[6], 6, leaves.len(), proof_parts)
-                .unwrap();
+            root_from_partial(&hasher, &leaves[6], 6, leaves.len(), proof_parts).unwrap();
 
         assert_eq!(*trusted_root, untrusted_root);
     }
