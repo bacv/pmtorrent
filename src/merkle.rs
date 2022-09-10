@@ -17,7 +17,7 @@ pub trait AsBytes {
 }
 
 pub fn is_pow_of_two(l: usize) -> bool {
-    (l & (l - 1)) == 0
+    l > 0 && (l & (l - 1)) == 0
 }
 
 pub trait MerkleTree<D, H>
@@ -29,10 +29,6 @@ where
     fn get_tree(&self) -> &[H::Hash];
 
     fn build_tree(hasher: &H, leaves: &[D]) -> Result<Vec<H::Hash>, MerkleError> {
-        if !is_pow_of_two(leaves.len()) {
-            return Err(MerkleError::LeafCount);
-        }
-
         let mut tree: Vec<H::Hash> = vec![];
 
         let first_level = Self::build_first_level(hasher, leaves)?;
