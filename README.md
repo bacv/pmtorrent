@@ -1,4 +1,4 @@
-# Poor -Man's- Torrent
+# Poor ~~Man's~~ Torrent
 
 _Toy example of file chunking and sharing in tamperproof way using Merkle tree_
 
@@ -32,6 +32,6 @@ cargo build
 
 The project has only one binary that can chunk the provided file and serve it over http. To run:
 ```bash
-cargo run -- /path/to/the/file.to_chunk
+cargo run -- /path/to/the/file.to_chunk # an optional flag for port can be added: --port 8081, the default is 8080.
 ```
 
