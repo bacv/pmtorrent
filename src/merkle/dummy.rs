@@ -5,6 +5,7 @@ struct DummyMerkleTree {
     tree: Vec<EmojiHash>,
 }
 
+/// Dummy implementation of MerkleTree for tests.
 impl DummyMerkleTree {
     #[allow(dead_code)]
     pub fn new(leaves: &[&'static str]) -> Result<Self, MerkleError> {
@@ -22,7 +23,6 @@ impl MerkleTree<&'static str, EmojiHasher> for DummyMerkleTree {
 }
 
 mod tests {
-
     #[test]
     fn test_build_tree() {
         use super::*;

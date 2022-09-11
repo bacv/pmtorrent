@@ -2,12 +2,26 @@ use std::fmt::{self, Debug};
 
 use crate::{AsBytes, Hasher};
 
+/// 🖖 Emoji hash is a fun part of this project.
+///
+/// This type is mostly used for MerkleTree trait default implementation (the tests can be found in
+/// `pmtorrent::merkle::dummy` module).
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct EmojiHash {
     hash: [u8; 4],
 }
 
 impl EmojiHash {
+    /// Method to convert EmojiHash byte values to an emoji reporesentation.
+    ///
+    /// # Safety
+    ///
+    /// This method is marked as unsafe for more than one reason.
+    /// * Even though it's possible to implement u32 conversion to a valid utf16 character with
+    /// additional checks (and in this case the `EmojiHasher::digest` method will always return a
+    /// valid utf16 char), this `unsafe` attribute is used to remind the caller that the whole
+    /// EmojiHasher is just for fun, not for safety and reliability.
+    /// * Some combinations of emoji hashes can appear offensive, use with caution.
     pub unsafe fn emoji(&self) -> char {
         let u_32 = u32::from_be_bytes(self.hash);
 

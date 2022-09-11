@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 mod file;
 mod hasher;
-mod merkle;
+pub mod merkle;
 mod repo;
 
 pub use file::*;

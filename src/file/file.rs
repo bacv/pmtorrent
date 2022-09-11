@@ -1,11 +1,11 @@
-use crate::hasher::Hash;
+use crate::hasher::Sha256Hash;
 use crate::merkle::{self, MerkleError, MerkleTree};
 use crate::{AsBytes, Chunk, Hasher, Sha256Hasher};
 use lazy_static::lazy_static;
 
 const CHUNK_BYTES: usize = 1024;
 lazy_static! {
-    static ref FILLER_HASH: Hash = Hash::new([0u8; 32]);
+    static ref FILLER_HASH: Sha256Hash = Sha256Hash::new([0u8; 32]);
 }
 
 #[derive(Debug)]
@@ -20,6 +20,7 @@ impl From<MerkleError> for FileError {
     }
 }
 
+/// A structure to hold bytes of a file in chunks together with a custom merkle tree.
 pub struct File {
     chunks: Vec<Chunk>,
     tree: ChunkMerkleTree,
@@ -33,7 +34,7 @@ impl File {
         Ok(Self { chunks, tree })
     }
 
-    pub fn get_root(&self) -> Result<Hash, FileError> {
+    pub fn get_root(&self) -> Result<Sha256Hash, FileError> {
         self.tree.root()
     }
 
@@ -41,14 +42,14 @@ impl File {
         self.chunks.len()
     }
 
-    pub fn get_chunk(&self, idx: usize) -> Result<(Chunk, Vec<crate::Hash>), FileError> {
+    pub fn get_chunk(&self, idx: usize) -> Result<(Chunk, Vec<crate::Sha256Hash>), FileError> {
         let chunk = self.chunks.get(idx).cloned().ok_or(FileError::File)?;
         let proof = self.tree.get_proof_hashes(chunk.leaf_idx)?;
 
         Ok((chunk, proof))
     }
 
-    pub fn trusted_root(&self) -> Result<Hash, FileError> {
+    pub fn trusted_root(&self) -> Result<Sha256Hash, FileError> {
         Ok(self.tree.tree.last().ok_or(FileError::File)?.to_owned())
     }
 
@@ -66,7 +67,7 @@ impl File {
 }
 
 pub struct ChunkMerkleTree {
-    tree: Vec<Hash>,
+    tree: Vec<Sha256Hash>,
 }
 
 impl ChunkMerkleTree {
@@ -77,7 +78,7 @@ impl ChunkMerkleTree {
         Ok(Self { tree })
     }
 
-    pub fn root(&self) -> Result<Hash, FileError> {
+    pub fn root(&self) -> Result<Sha256Hash, FileError> {
         Ok(self
             .tree
             .last()
@@ -87,10 +88,13 @@ impl ChunkMerkleTree {
 }
 
 impl MerkleTree<Chunk, Sha256Hasher> for ChunkMerkleTree {
-    fn get_tree(&self) -> &[Hash] {
+    fn get_tree(&self) -> &[Sha256Hash] {
         &self.tree
     }
 
+    /// Custom implementation for [`MerkleTree::build_first_level`] method.
+    /// It pads the last leaf if it doesn't have the exact size of `CHUNK_BYTES` and appends
+    /// `FILLER_HASH` to the leaf vector if it's size is not in power of 2.
     fn build_first_level(
         hasher: &Sha256Hasher,
         leaves: &[Chunk],
@@ -98,7 +102,7 @@ impl MerkleTree<Chunk, Sha256Hasher> for ChunkMerkleTree {
         let mut padded_hashes = leaves
             .iter()
             .map(|l| pad_payload(hasher, l))
-            .collect::<Vec<Hash>>();
+            .collect::<Vec<Sha256Hash>>();
 
         let next_pow2 = next_pow2(leaves.len());
         if next_pow2 != leaves.len() {
@@ -115,8 +119,8 @@ pub fn root_from_partial(
     leaf: &Chunk,
     leaf_idx: usize,
     leaf_count: usize,
-    hashes: Vec<Hash>,
-) -> Result<Hash, FileError> {
+    hashes: Vec<Sha256Hash>,
+) -> Result<Sha256Hash, FileError> {
     let padded_leaf = if leaf.data.len() < CHUNK_BYTES {
         pad_data(leaf)
     } else {
@@ -138,7 +142,7 @@ fn pad_data(c: &Chunk) -> Chunk {
     }
 }
 
-fn pad_payload(hasher: &Sha256Hasher, l: &Chunk) -> Hash {
+fn pad_payload(hasher: &Sha256Hasher, l: &Chunk) -> Sha256Hash {
     if l.len() < CHUNK_BYTES {
         let mut p = [0u8; CHUNK_BYTES];
         for (i, b) in l.as_bytes().iter().enumerate() {

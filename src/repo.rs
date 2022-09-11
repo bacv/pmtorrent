@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use crate::{
     encode_hex,
     file::{File, FileError},
-    AsBytes, Chunk, Hash, MerkleError,
+    AsBytes, Chunk, MerkleError, Sha256Hash,
 };
 
 #[derive(Debug)]
@@ -31,7 +31,7 @@ impl From<FileError> for RepoError {
 #[derive(Serialize, Clone, Debug)]
 pub struct Piece {
     pub content: Chunk,
-    pub proof: Vec<Hash>,
+    pub proof: Vec<Sha256Hash>,
 }
 
 #[derive(Default)]
