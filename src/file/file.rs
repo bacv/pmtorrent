@@ -1,14 +1,12 @@
-use std::convert::TryInto;
-
-use ring::digest;
-
-use crate::{
-    merkle::{self, AsBytes, Hasher, MerkleError, MerkleTree},
-    Chunk, Hash,
-};
+use crate::hasher::Hash;
+use crate::merkle::{self, MerkleError, MerkleTree};
+use crate::{AsBytes, Chunk, Hasher, Sha256Hasher};
+use lazy_static::lazy_static;
 
 const CHUNK_BYTES: usize = 1024;
-const FILLER_HASH: Hash = Hash([0u8; 32]);
+lazy_static! {
+    static ref FILLER_HASH: Hash = Hash::new([0u8; 32]);
+}
 
 #[derive(Debug)]
 pub enum FileError {
@@ -67,17 +65,6 @@ impl File {
     }
 }
 
-pub struct Sha256Hasher;
-
-impl Hasher for Sha256Hasher {
-    type Hash = Hash;
-
-    fn digest(&self, data: &[u8]) -> Hash {
-        let h = digest::digest(&digest::SHA256, data);
-        Hash(h.as_ref().try_into().expect("32 byte value"))
-    }
-}
-
 pub struct ChunkMerkleTree {
     tree: Vec<Hash>,
 }
@@ -115,13 +102,14 @@ impl MerkleTree<Chunk, Sha256Hasher> for ChunkMerkleTree {
 
         let next_pow2 = next_pow2(leaves.len());
         if next_pow2 != leaves.len() {
-            padded_hashes.resize(next_pow2, FILLER_HASH);
+            padded_hashes.resize(next_pow2, FILLER_HASH.clone());
         }
 
         Ok(padded_hashes)
     }
 }
 
+#[allow(dead_code)]
 pub fn root_from_partial(
     hasher: &Sha256Hasher,
     leaf: &Chunk,
@@ -174,18 +162,10 @@ fn next_pow2(n: usize) -> usize {
 }
 
 mod tests {
-    use std::convert::TryInto;
-
-    use crate::{
-        file::FILLER_HASH,
-        merkle::{Hasher, MerkleTree},
-        Chunk,
-    };
-
-    use super::{next_pow2, ChunkMerkleTree, File, Sha256Hasher};
-
     #[test]
     fn test_bytes_to_chunks() {
+        use super::*;
+
         let data = [1u8; 6144]; // exactly 6 full chunks.
         let chunks = File::to_chunks(&data);
 
@@ -202,18 +182,22 @@ mod tests {
 
     #[test]
     fn test_build_first_level() {
+        use super::*;
+
         let chunks = File::to_chunks(&[1u8; 6144]);
         let chunk_tree = ChunkMerkleTree::new(&chunks);
         assert!(chunk_tree.is_ok());
 
         let chunk_tree = chunk_tree.unwrap();
         assert_eq!(chunk_tree.tree.len(), 15);
-        assert_eq!(chunk_tree.tree[6], FILLER_HASH);
-        assert_eq!(chunk_tree.tree[7], FILLER_HASH);
+        assert_eq!(chunk_tree.tree[6], FILLER_HASH.clone());
+        assert_eq!(chunk_tree.tree[7], FILLER_HASH.clone());
     }
 
     #[test]
     fn test_new_file() {
+        use super::*;
+
         let data = [0u8; 6145];
         let file = File::new(&data).unwrap();
         assert_eq!(file.chunks.len(), 7);
@@ -232,6 +216,8 @@ mod tests {
 
     #[test]
     fn test_next_pow2() {
+        use super::*;
+
         assert_eq!(next_pow2(4), 4);
         assert_eq!(next_pow2(6), 8);
         assert_eq!(next_pow2(9), 16);

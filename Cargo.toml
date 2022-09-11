@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 axum = { version = "0.5.16", features = ["base64"] }
 base64 = "0.13.0"
+clap = { version = "3.2.20", features = ["derive"] }
+lazy_static = "1.4.0"
 ring = "0.16.20"
 serde = { version = "1.0.144", features = ["derive"] }
 serde_json = "1.0.85"

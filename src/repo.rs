@@ -4,8 +4,7 @@ use std::collections::HashMap;
 use crate::{
     encode_hex,
     file::{File, FileError},
-    merkle::AsBytes,
-    Hash, Piece,
+    AsBytes, Chunk, Hash, MerkleError,
 };
 
 #[derive(Debug)]
@@ -22,8 +21,17 @@ pub struct FileDescription {
 
 impl From<FileError> for RepoError {
     fn from(e: FileError) -> Self {
-        RepoError::File(e)
+        match e {
+            FileError::Merkle(MerkleError::InvalidIdx) => RepoError::DoesntExist,
+            _ => RepoError::File(e),
+        }
     }
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct Piece {
+    pub content: Chunk,
+    pub proof: Vec<Hash>,
 }
 
 #[derive(Default)]
@@ -52,13 +60,5 @@ impl FileRepo {
         let file = self.files.get(&hash).ok_or(RepoError::DoesntExist)?;
         let (content, proof) = file.get_chunk(piece)?;
         Ok(Piece { content, proof })
-    }
-
-    pub fn remove(&self, hash: &Hash) -> Result<(), RepoError> {
-        todo!()
-    }
-
-    pub fn get(&self, hash: &Hash) -> Result<(), RepoError> {
-        todo!()
     }
 }
