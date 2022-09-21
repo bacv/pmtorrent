@@ -2,6 +2,7 @@ use crate::hasher::Sha256Hash;
 use crate::merkle::{self, MerkleError, MerkleTree};
 use crate::{AsBytes, Chunk, Hasher, Sha256Hasher};
 use lazy_static::lazy_static;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 const CHUNK_BYTES: usize = 1024;
 lazy_static! {
@@ -27,6 +28,36 @@ pub struct File {
 }
 
 impl File {
+    pub async fn from_reader<R>(mut reader: R) -> Result<Self, FileError>
+    where
+        R: AsyncRead + Unpin,
+    {
+        let mut buf = [0; CHUNK_BYTES];
+        let mut chunks = Vec::default();
+        let mut idx = 0;
+
+        loop {
+            let bytes = reader
+                .read(&mut buf[..])
+                .await
+                .map_err(|_| FileError::File)?;
+
+            if bytes == 0 {
+                break;
+            }
+
+            chunks.push(Chunk {
+                data: buf[..bytes].to_vec(),
+                leaf_idx: idx,
+            });
+
+            idx += 1;
+        }
+
+        let tree = ChunkMerkleTree::new(&chunks)?;
+        Ok(Self { chunks, tree })
+    }
+
     pub fn new(data: &[u8]) -> Result<Self, FileError> {
         let chunks = Self::to_chunks(data);
         let tree = ChunkMerkleTree::new(&chunks)?;
@@ -225,5 +256,39 @@ mod tests {
         assert_eq!(next_pow2(4), 4);
         assert_eq!(next_pow2(6), 8);
         assert_eq!(next_pow2(9), 16);
+    }
+
+    #[test]
+    fn test_async_read() {
+        assert_eq!(test_fail("aabb"), "2a2b".to_string());
+        assert_eq!(test_fail("aaabbccc"), "3a2b3c".to_string());
+        assert_eq!(test_fail("abcccaaba"), "1a1b3c2a1b1a".to_string());
+    }
+
+    #[allow(dead_code)]
+    fn test_fail(txt: &str) -> String {
+        let mut res = String::new();
+        let mut counter = 0;
+        let mut prev_char = char::default();
+
+        for c in txt.chars() {
+            if prev_char != c {
+                if counter > 0 {
+                    res.push_str(&counter.to_string());
+                    res.push_str(&prev_char.to_string());
+                }
+                counter = 0;
+            }
+
+            counter += 1;
+            prev_char = c;
+        }
+
+        if counter > 0 {
+            res.push_str(&counter.to_string());
+            res.push_str(&prev_char.to_string());
+        }
+
+        res
     }
 }

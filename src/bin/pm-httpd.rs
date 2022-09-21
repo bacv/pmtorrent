@@ -7,7 +7,8 @@ use axum::{
 };
 use clap::Parser;
 use pmtorrent::{FileDescription, FileRepo, Piece, RepoError};
-use std::{fs::File, io::Read, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
+use tokio::fs::File;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
@@ -23,12 +24,8 @@ struct Args {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    let mut file = File::open(args.path)?;
-
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf).unwrap();
-
-    let file = pmtorrent::File::new(&buf).unwrap();
+    let file = File::open(args.path).await?;
+    let file = pmtorrent::File::from_reader(file).await.unwrap();
 
     let mut repo = FileRepo::default();
     repo.add(file).expect("new file");
